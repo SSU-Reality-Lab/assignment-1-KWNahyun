@@ -17,6 +17,13 @@ def gaussian_blur_kernel_2d(sigma, height, width):
         (height x width) 크기의 커널을 반환합니다. 이 커널로 이미지를 컨볼브하면
         가우시안 블러가 적용된 결과가 나옵니다.
     '''
+    x = np.arange(-(width // 2), width // 2 + 1)
+    y = np.arange(-(height // 2), height // 2 + 1)
+    xx, yy = np.meshgrid(x, y)
+
+    kernel = np.exp(-(xx**2 + yy**2) / (2 * sigma**2))
+
+    return kernel / np.sum(kernel)
 
 def cross_correlation_2d(img, kernel):
     '''주어진 커널(크기 m x n )을 사용하여 입력 이미지와의
@@ -29,13 +36,30 @@ def cross_correlation_2d(img, kernel):
                 그레이스케일 이미지(height x width).
         kernel: 2차원 NumPy 배열(m x n). m과 n은 모두 홀수(서로 같을 필요는 없음).
     '''
+    k_height, k_width = kernel.shape
     
-    '''출력(Output):
-        입력 이미지와 동일한 크기(같은 너비, 높이, 채널 수)의 이미지를 반환합니다.
-    '''
+    pad_height = k_height // 2
+    pad_width = k_width // 2
+    
+    output = np.zeros_like(img, dtype=np.float32)
+
+    if len(img.shape) == 2: 
+        padded_img = np.pad(img, ((pad_height, pad_height), (pad_width, pad_width)), mode='constant', constant_values=0)
+        for i in range(img.shape[0]):
+            for j in range(img.shape[1]):
+                output[i, j] = np.sum(padded_img[i:i+k_height, j:j+k_width] * kernel)
+    elif len(img.shape) == 3: 
+        for c in range(img.shape[2]):
+            channel_img = img[:, :, c]
+            padded_img = np.pad(channel_img, ((pad_height, pad_height), (pad_width, pad_width)), mode='constant', constant_values=0)
+            for i in range(img.shape[0]):
+                for j in range(img.shape[1]):
+                    output[i, j, c] = np.sum(padded_img[i:i+k_height, j:j+k_width] * kernel)
+    return output
 
 def convolve_2d(img, kernel):
     '''cross_correlation_2d()를 사용하여 2D 컨볼루션을 수행합니다.
+    컨볼루션은 커널을 180도 회전시킨 후 상관관계를 적용하는 것과 같습니다.
 
     입력(Inputs):
         img:    NumPy 배열 형태의 RGB 이미지(height x width x 3) 또는
@@ -45,25 +69,31 @@ def convolve_2d(img, kernel):
     출력(Output):
         입력 이미지와 동일한 크기(같은 너비, 높이, 채널 수)의 이미지를 반환합니다.
     '''
-
+    flipped_kernel = np.flip(kernel)
+    return cross_correlation_2d(img, flipped_kernel)
 
 def low_pass(img, sigma, size):
     '''주어진 sigma와 정사각형 커널 크기(size)를 사용해 저역통과(low-pass)
     필터가 적용된 것처럼 이미지를 필터링합니다. 저역통과 필터는 이미지의
-    고주파(세밀한 디테일) 성분을 억제합니다.
+    고주파(세밀한 디테일) 성분을 억제하여 이미지를 부드럽게 만듭니다.
 
     출력(Output):
         입력 이미지와 동일한 크기(같은 너비, 높이, 채널 수)의 이미지를 반환합니다.
     '''
+    kernel = gaussian_blur_kernel_2d(sigma, size, size)
+    return convolve_2d(img, kernel)
 
 def high_pass(img, sigma, size):
     '''주어진 sigma와 정사각형 커널 크기(size)를 사용해 고역통과(high-pass)
     필터가 적용된 것처럼 이미지를 필터링합니다. 고역통과 필터는 이미지의
-    저주파(거친 형태) 성분을 억제합니다.
+    저주파(거친 형태) 성분을 억제하여 이미지의 날카로운 디테일(엣지 등)을 추출합니다.
+    이는 원본 이미지에서 저역통과 필터링된 이미지를 빼서 구현합니다.
 
     출력(Output):
         입력 이미지와 동일한 크기(같은 너비, 높이, 채널 수)의 이미지를 반환합니다.
     '''
+    low_passed_img = low_pass(img, sigma, size)
+    return img - low_passed_img
 
 def create_hybrid_image(img1, img2, sigma1, size1, high_low1, sigma2, size2,
         high_low2, mixin_ratio, scale_factor):
